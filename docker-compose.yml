@@ -1,0 +1,92 @@
+version: '3'
+services:
+  worker:
+    build:
+      context: ./worker
+      args:
+        - BUILDPLATFORM=${BUILDPLATFORM}
+        - TARGETPLATFORM=${TARGETPLATFORM}
+        - TARGETARCH=${TARGETARCH}
+    container_name: worker
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    networks:
+      - back-tier
+
+  vote:
+    build:
+      context: ./vote
+    container_name: vote
+    volumes:
+      - ./vote:/usr/local/app
+    ports:
+      - "5002:80"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - back-tier
+      - front-tier
+
+  seed-data:
+    build:
+      context: ./seed-data
+    container_name: seed
+    profiles: ["seed"]
+    depends_on:
+      vote:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - front-tier
+
+  result:
+    build:
+      context: ./result
+    container_name: result
+    entrypoint: nodemon --inspect=0.0.0.0 server.js
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./result:/usr/local/app
+    ports:
+      - "5001:80"
+      - "127.0.0.1:9229:9229"
+  db:
+    image: postgres:15-alpine
+    container_name: postgres_db
+    networks:
+      - back-tier
+    volumes:
+      - "db-data:/var/lib/postgresql/data"
+      - "./healthchecks:/healthchecks"
+    healthcheck:
+      test: /healthchecks/postgres.sh
+      interval: "5s"
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+  redis:
+    image: redis:latest
+    volumes:
+      - "./healthchecks:/healthchecks"
+    healthcheck:
+      test: /healthchecks/redis.sh
+      interval: "5s"
+    networks:
+      - back-tier
+
+volumes:
+  db-data:
+
+networks:
+  front-tier:
+  back-tier:
+
